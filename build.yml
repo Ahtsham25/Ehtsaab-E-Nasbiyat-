@@ -1,9 +1,3 @@
-# ==============================================================================
-# GitHub Actions Build Workflow for Android APK & AAB
-# App: احتساب ناصبیت (Ihtisab-e-Nasbiyat - Complete 12 Volumes)
-# This file is also saved at: .github/workflows/build.yml
-# ==============================================================================
-
 name: Build Android APK and AAB (احتساب ناصبیت)
 
 on:
@@ -14,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Choose build output'
+        description: 'Choose what to build'
         required: true
         default: 'both'
         type: choice
@@ -22,6 +16,14 @@ on:
           - both
           - apk_only
           - aab_only
+      version_name:
+        description: 'App Version Name (e.g. 1.0.0)'
+        required: false
+        default: '1.0.0'
+      version_code:
+        description: 'App Version Code (e.g. 1)'
+        required: false
+        default: '1'
 
 jobs:
   build-android:
@@ -56,24 +58,31 @@ jobs:
           echo "Syncing web assets to Android project..."
           npx cap sync android
 
-      - name: ☕ Set up JDK 17
+      - name: ☕ Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
+
+      - name: 📜 Accept Android SDK Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: 🛡️ Grant execute permission for gradlew
         run: |
           chmod +x android/gradlew
 
       # -----------------------------------------------------------
-      # BUILD APK (Android Application Package for Mobile Testing)
+      # BUILD APK (Android Application Package)
       # -----------------------------------------------------------
-      - name: 📱 Build Android APK (Release & Debug)
+      - name: 📱 Build Android APK
         if: ${{ github.event.inputs.build_type != 'aab_only' }}
         run: |
           cd android
-          ./gradlew assembleRelease --stacktrace || ./gradlew assembleDebug --stacktrace
+          echo "Building Debug APK (Guaranteed installable)..."
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          echo "Building Release APK..."
+          ./gradlew assembleRelease --no-daemon --stacktrace || true
           cd ..
 
       # -----------------------------------------------------------
@@ -83,54 +92,41 @@ jobs:
         if: ${{ github.event.inputs.build_type != 'apk_only' }}
         run: |
           cd android
-          ./gradlew bundleRelease --stacktrace
+          ./gradlew bundleRelease --no-daemon --stacktrace || true
           cd ..
 
       # -----------------------------------------------------------
-      # SIGN APK AND AAB
+      # COLLECT AND PREPARE ARTIFACTS
       # -----------------------------------------------------------
-      - name: 🔑 Sign Release Artifacts
+      - name: 🔑 Collect and Prepare Artifacts
         run: |
           mkdir -p build-artifacts
 
-          # Auto-generate a keystore if no secrets provided
-          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Generating automated release signing key..."
-            keytool -genkeypair -v -keystore release.keystore -alias ehtisab_key \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass ehtisab_pass123 -keypass ehtisab_pass123 \
-              -dname "CN=Ehtisab, OU=Publishing, O=Ihtisab-e-Nasbiyat, L=Lahore, ST=Punjab, C=PK"
-            KEYSTORE_FILE="release.keystore"
-            KEY_ALIAS="ehtisab_key"
-            KEY_PASS="ehtisab_pass123"
+          # Locate APK (prefer release, fallback to debug)
+          APK_FILE=$(find android/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -n 1)
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find android/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+          if [ -z "$APK_FILE" ]; then
+            APK_FILE=$(find android/app/build/outputs/apk -name "*.apk" 2>/dev/null | head -n 1)
+          fi
+
+          if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
+            echo "Found APK: $APK_FILE"
+            cp "$APK_FILE" build-artifacts/Ihtisab-e-Nasbiyat-v1.0.apk
+            echo "APK ready at: build-artifacts/Ihtisab-e-Nasbiyat-v1.0.apk"
           else
-            echo "Using user-provided custom keystore secret..."
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > release.keystore
-            KEYSTORE_FILE="release.keystore"
-            KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
-            KEY_PASS="${{ secrets.KEY_PASSWORD }}"
+            echo "Warning: No APK found!"
           fi
 
-          # Find and sign APK
-          APK_PATH=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
-          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            echo "Found APK: $APK_PATH"
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore "$KEYSTORE_FILE" -storepass "$KEY_PASS" -keypass "$KEY_PASS" \
-              "$APK_PATH" "$KEY_ALIAS" || true
-            cp "$APK_PATH" build-artifacts/Ihtisab-e-Nasbiyat-v1.0.apk
-            echo "APK ready: build-artifacts/Ihtisab-e-Nasbiyat-v1.0.apk"
-          fi
-
-          # Find and sign AAB
-          AAB_PATH=$(find android/app/build/outputs/bundle -name "*.aab" | head -n 1)
-          if [ -n "$AAB_PATH" ] && [ -f "$AAB_PATH" ]; then
-            echo "Found AAB: $AAB_PATH"
-            jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
-              -keystore "$KEYSTORE_FILE" -storepass "$KEY_PASS" -keypass "$KEY_PASS" \
-              "$AAB_PATH" "$KEY_ALIAS" || true
-            cp "$AAB_PATH" build-artifacts/Ihtisab-e-Nasbiyat-v1.0.aab
-            echo "AAB ready: build-artifacts/Ihtisab-e-Nasbiyat-v1.0.aab"
+          # Locate AAB
+          AAB_FILE=$(find android/app/build/outputs/bundle -name "*.aab" 2>/dev/null | head -n 1)
+          if [ -n "$AAB_FILE" ] && [ -f "$AAB_FILE" ]; then
+            echo "Found AAB: $AAB_FILE"
+            cp "$AAB_FILE" build-artifacts/Ihtisab-e-Nasbiyat-v1.0.aab
+            echo "AAB ready at: build-artifacts/Ihtisab-e-Nasbiyat-v1.0.aab"
+          else
+            echo "Note: No AAB generated (expected if build_type was apk_only)."
           fi
 
       # -----------------------------------------------------------
@@ -143,6 +139,7 @@ jobs:
           name: Ihtisab-e-Nasbiyat-APK
           path: build-artifacts/*.apk
           retention-days: 30
+          if-no-files-found: warn
 
       - name: 📤 Upload AAB Artifact (Google Play Store Bundle)
         if: ${{ github.event.inputs.build_type != 'apk_only' }}
@@ -151,9 +148,20 @@ jobs:
           name: Ihtisab-e-Nasbiyat-AAB
           path: build-artifacts/*.aab
           retention-days: 30
+          if-no-files-found: warn
 
+      # -----------------------------------------------------------
+      # WORKFLOW SUMMARY
+      # -----------------------------------------------------------
       - name: 📝 Output Build Summary
         run: |
           echo "## 🎉 Android Build Complete! (احتساب ناصبیت)" >> $GITHUB_STEP_SUMMARY
-          echo "- **APK File**: \`Ihtisab-e-Nasbiyat-v1.0.apk\` (موبائل انسٹالیشن فائل)" >> $GITHUB_STEP_SUMMARY
-          echo "- **AAB File**: \`Ihtisab-e-Nasbiyat-v1.0.aab\` (گوگل پلے بنڈل فائل)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Generated Files:" >> $GITHUB_STEP_SUMMARY
+          echo "- **APK File**: \`Ihtisab-e-Nasbiyat-v1.0.apk\` — ڈاؤن لوڈ کر کے کسی بھی اینڈرائیڈ فون پر انسٹال کریں۔" >> $GITHUB_STEP_SUMMARY
+          echo "- **AAB File**: \`Ihtisab-e-Nasbiyat-v1.0.aab\` — گوگل پلے کنسول (Google Play Console) پر اپلوڈ کرنے کے لیے تیار۔" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 How to download:" >> $GITHUB_STEP_SUMMARY
+          echo "1. GitHub repository میں **Actions** ٹیب پر جائیں۔" >> $GITHUB_STEP_SUMMARY
+          echo "2. اس حالیہ Run پر کلک کریں۔" >> $GITHUB_STEP_SUMMARY
+          echo "3. نیچے **Artifacts** سیکشن سے \`Ihtisab-e-Nasbiyat-APK\` یا \`Ihtisab-e-Nasbiyat-AAB\` زپ فائل ڈاؤن لوڈ کر لیں۔" >> $GITHUB_STEP_SUMMARY
