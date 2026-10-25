@@ -1,0 +1,26 @@
+{
+  "name": "احتساب ناصبیت - مکمل ۱۲ جلدیں",
+  "short_name": "احتساب ناصبیت",
+  "description": "کتاب احتساب ناصبیت کی مکمل ۱۲ جلدوں کی آفیشل ایپ بمع انٹرنل ریڈر اور پی ڈی ایف ڈاؤن لوڈز۔",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0a09",
+  "theme_color": "#064e3b",
+  "dir": "rtl",
+  "lang": "ur",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
