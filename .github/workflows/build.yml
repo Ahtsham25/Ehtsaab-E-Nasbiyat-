@@ -61,10 +61,11 @@ jobs:
           echo "Syncing web assets to Android project..."
           npx cap sync android
 
-          # Ensure compileSdkVersion and targetSdkVersion are 35 for runner stability
-          if [ -f "android/variables.gradle" ]; then
-            sed -i 's/compileSdkVersion = 36/compileSdkVersion = 35/g' android/variables.gradle || true
-            sed -i 's/targetSdkVersion = 36/targetSdkVersion = 35/g' android/variables.gradle || true
+          # Ensure android.builder.sdkDownload=true for automatic missing SDK components download
+          if [ -f "android/gradle.properties" ]; then
+            if ! grep -q "android.builder.sdkDownload" android/gradle.properties; then
+              echo "android.builder.sdkDownload=true" >> android/gradle.properties
+            fi
           fi
 
           # Ensure release APK is signed with debug keystore fallback
@@ -80,9 +81,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 📜 Accept Android SDK Licenses
+      - name: 📜 Accept Android SDK Licenses & Prepare SDK 36
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" || true
 
       - name: 🛡️ Grant execute permission for gradlew
         run: |
